@@ -142,3 +142,37 @@ class Edge(BaseModel):
     @classmethod
     def label_must_be_trimmed(cls,v:str)-> str:
         return v.strip()
+    
+    @model_validator(mode="after")
+    def validate_edge_consistency(self) ->"Edge":
+        
+        if self.source_id == self.target_id:
+            raise ValueError("Self connection not allowed")
+        
+        if self.has_timeout and self.timeout_ms is None:
+            default_timeouts = {
+                ConnectionType.SYNC: 5000,
+                ConnectionType.DATABASE: 10000,
+                ConnectionType.CACHE_READ: 100,
+                ConnectionType.CACHE_WRITE: 500,
+                ConnectionType.ASYNC: None,   
+                ConnectionType.STREAM: None,
+            }
+            default = default_timeouts.get(self.connection_type,5000)
+
+            if default is not None:
+                object.__setattr__(self,"timeout_ms",default)
+            else:
+                # async/stream no timeout
+                object.__setattr__(self,"has_timeout",False)
+
+        # async should not have timeouts
+        if not self.is_synchronous and self.has_timeout:
+            object.__setattr__(self,"has_timeout",False)
+            object.__setattr__(self,"timeout_ms",None)
+
+        # retry w/o timeout not allowed
+        if self.has_retry and not self.has_timeout and self.is_synchronous:
+            raise ValueError("Retries w/o timeout can cause indefinite blocking")
+        
+        return self
