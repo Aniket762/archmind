@@ -106,3 +106,39 @@ class Edge(BaseModel):
         max_length=500,
         description="Describe what data flows over this connection"
     )
+
+    @property
+    def is_resilient(self) -> bool:
+        return self.has_timeout and (self.has_circuit_breaker or self.has_retry)
+    
+    @property
+    def is_synchronous(self) -> bool:
+        return self.connection_type in {
+            ConnectionType.SYNC,
+            ConnectionType.DATABASE,
+            ConnectionType.CACHE_READ,
+            ConnectionType.CACHE_WRITE
+        }
+    
+    @property
+    def propagates_failures_immediately(self) -> bool:
+        return self.is_synchronous and not self.has_circuit_breaker
+
+    
+    @property
+    def effective_latency_ms(self) -> int:
+        return self.latency_ms * (1 + self.retry_count)
+    
+    # sync + ~cb + ~retry
+    # cascade failure starts
+    def represents_critical_dependency(self) -> bool:
+        return (
+            self.is_synchronous
+            and not self.has_circuit_breaker
+            and (self.retry_count==0 or not self.has_retry)
+        )
+    
+    @field_validator('label')
+    @classmethod
+    def label_must_be_trimmed(cls,v:str)-> str:
+        return v.strip()
