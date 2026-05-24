@@ -140,3 +140,99 @@ class GraphAnalyzer:
  
         critical_nodes.sort(key=lambda n: n.betweenness_score, reverse=True)
         return critical_nodes
+    '''
+    Single Point of Failure
+    1. >=2 critical dependency
+    2. structural spofs
+    '''
+    def find_spofs(self)-> List[str]:
+        spofs:Set[str] = set()
+
+        undirected = self.graph.to_undirected()
+        if nx.is_connected(undirected):
+            articulation_points = set(nx.articulation_points(undirected))
+            spofs.update(articulation_points)
+ 
+        for node_id in self.graph.nodes():
+            node_data = self.graph.nodes[node_id].get("data")
+            if not node_data:
+                continue
+ 
+            in_degree = self.graph.in_degree(node_id)
+ 
+            if node_data.is_stateful and in_degree >= 2:
+                spofs.add(node_id)
+ 
+            if node_data.critical and node_data.replicas == 1:
+                spofs.add(node_id)
+ 
+        return sorted(spofs)
+    
+    # nodes that must run for this to be up
+    def get_upstream_nodes(self, node_id:str) -> List[str]:
+        if node_id not in self.graph:
+            return []
+        return list(self.graph.predecessors(node_id))
+    
+    def get_downstream_nodes(self, node_id:str) -> List[str]:
+        if node_id not in self.graph:
+            return []
+        return list(self.graph.successors(node_id))
+    
+    # dfs on node for all upstream a->b->c then a's transitive dependency b,c
+    def get_transitive_dependencies(self, node_id: str) -> Set[str]:
+        if node_id not in self.graph:
+            return set()
+        return nx.ancestors(self.graph, node_id)
+ 
+    def get_transitive_dependents(self, node_id: str) -> Set[str]:
+        if node_id not in self.graph:
+            return set()
+ 
+        return nx.descendants(self.graph, node_id)
+ 
+    def find_isolated_nodes(self) -> List[str]:
+        return [
+            node_id
+            for node_id in self.graph.nodes()
+            if self.graph.degree(node_id) == 0
+        ]
+ 
+    def calculate_density(self) -> float:
+        if self.graph.number_of_nodes() == 0:
+            return 0.0
+        return self.graph.number_of_edges() / self.graph.number_of_nodes()
+ 
+    def generate_warnings(self, summary: AnalysisSummary) -> List[str]:
+        warnings = []
+ 
+        if summary.cycles:
+            warnings.append(
+                f"Found {len(summary.cycles)} circular dependencies. "
+                "This can cause deployment deadlocks and cascade failures."
+            )
+ 
+        if summary.potential_spofs:
+            warnings.append(
+                f"Found {len(summary.potential_spofs)} potential single points of failure. "
+                "Consider adding redundancy."
+            )
+ 
+        if summary.density > 4.0:
+            warnings.append(
+                f"High coupling detected (density: {summary.density:.2f}). "
+                "Consider breaking apart tightly coupled components."
+            )
+ 
+        if summary.component_count > 1:
+            warnings.append(
+                f"Graph has {summary.component_count} disconnected components. "
+                "This might indicate isolated subsystems or incomplete architecture."
+            )
+ 
+        if summary.isolated_nodes:
+            warnings.append(
+                f"Found {len(summary.isolated_nodes)} isolated nodes with no connections."
+            )
+ 
+        return warnings
