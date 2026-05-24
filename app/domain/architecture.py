@@ -143,3 +143,57 @@ class ArchitectureGraph(BaseModel):
         tag_lower = tag.lower()
         return [node for node in self.nodes.values() if node.has_tag(tag_lower)]
     
+    @property
+    def node_count(self) -> int:
+        return len(self.nodes)
+
+    @property
+    def edge_count(self) -> int:
+        return len(self.edges)
+    
+    @property
+    def is_empty(self) -> bool:
+        return self.node_count ==0
+    
+    '''
+    edge/vertices ratio used to determine coupling
+    - low density (<2): loosely coupled
+    - medium density (2-4): targeted coupling
+    - high density (>4): tightly couple
+    '''
+    @property
+    def density(self) -> float:
+        if self.node_count ==0:
+            return 0.0
+        return self.edge_count/self.node_count
+    
+    @property
+    def to_dict(self)->dict:
+        return self.model_dump(mode="json")
+    
+    @classmethod
+    def from_dict(cls,data:dict) -> "ArchitectureGraph":
+        return cls.model_validate(data)
+
+    def iter_nodes(self)->Iterator[Node]:
+        return iter(self.nodes.values())
+    
+    def iter_edges(self)-> Iterator[Edge]:
+        return iter(self.edges)
+    
+    def summary(self)->str:
+        node_types={}
+        for node in self.nodes.values():
+            node_types[node.node_type.value] = node_types.get(node.node_type.value,0)+1
+
+        type_breakdown = ", ".join(
+            f"{count} {nodetype}" for nodetype, count in sorted(node_types.items())
+        )
+ 
+        return (
+            f"{self.name} ({self.graph_id})\n"
+            f"Nodes: {self.node_count} ({type_breakdown})\n"
+            f"Edges: {self.edge_count}\n"
+            f"Density: {self.density:.2f} edges/node\n"
+            f"AI generated: {self.ai_generated}"
+        )
