@@ -1,5 +1,5 @@
 # prompts refined with haiku 4.6
-from langchain.prompts import PromptTemplate
+from langchain_core.prompts import PromptTemplate
 
 SYSTEM_PROMPT = """You are an expert system architect with 15+ years of experience.
  

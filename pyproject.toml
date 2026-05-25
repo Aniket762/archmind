@@ -39,7 +39,7 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/archmind"]
+packages = ["app"]
 
 [tool.ruff]
 line-length = 88
