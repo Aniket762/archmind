@@ -12,6 +12,7 @@ except ImportError:
     LANGGRAPH_AVAILABLE = False
     logger.warning("LangGraph not available, will use mock planner")
 
+
 class ArchitecturePlanner:
     def __init__(self):
         self._use_langgraph = LANGGRAPH_AVAILABLE
@@ -19,20 +20,20 @@ class ArchitecturePlanner:
         if self._use_langgraph:
             try:
                 self._langgraph_planner = ArchitecturePlannerWithLangGraph(verbose=True)
-                logger.info("initialized LangGraph planner")
+                logger.info("initialized LangGraph planner (OpenAI)")
             except Exception as e:
-                logger.warning(f"failed to initialize LangGraph: {e}")
+                logger.warning(f"Failed to initialize LangGraph: {e}")
                 self._use_langgraph = False
                 self._mock_planner = MockArchitecturePlanner()
                 logger.info("initialized mock planner")
         else:
             self._mock_planner = MockArchitecturePlanner()
             logger.info("initialized mock planner")
- 
+
     async def plan(self, prompt: str) -> ArchitectureGraph:
         if len(prompt.strip()) < 10:
             raise ValueError("Prompt must be at least 10 characters")
- 
+        
         if self._use_langgraph:
             try:
                 result = await self._langgraph_planner.plan(prompt)
@@ -42,9 +43,8 @@ class ArchitecturePlanner:
             except Exception as e:
                 logger.warning(f"LangGraph failed: {e}, falling back to mock")
                 self._use_langgraph = False
- 
-        # fall back to mock planner
-        logger.info("using mock planner (keyword-based)")
+
+        logger.info("using mock planner")
         try:
             result = await self._mock_planner.plan(prompt)
             return result
