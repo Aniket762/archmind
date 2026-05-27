@@ -77,6 +77,7 @@ async def parse_step(state: ArchitectureState)-> ArchitectureState:
         state["error_step"] = "parse"
         return state
     
+# check for spec issue
 async def validate_step(state: ArchitectureGraph) -> ArchitectureGraph:
     logger.info("validate step: spec realism ...")
     if state.get("error_step") == "parse":
@@ -119,4 +120,135 @@ async def validate_step(state: ArchitectureGraph) -> ArchitectureGraph:
         state["error_message"] = str(e)
         state["error_step"] = "validate"
         return state
+
+# json to domain models
+async def convert_step(state: ArchitectureState) -> ArchitectureState:
+    logger.info("building domain models...")
+
+    if state.get("error_step"):
+        logger.warning("skipping error in {state['error_step']}")
+        return state
     
+    try:
+        spec = state["parsed_spec_dict"]
+        arch = ArchitectureGraph(
+            name=spec.get("name", "Generated Architecture"),
+            description=spec.get("description", ""),
+            source_prompt=state["user_prompt"],
+            ai_generated=True,
+        )
+        
+        logger.info(f"  Converting {len(spec.get('nodes', []))} nodes...")
+        for node_spec in spec.get("nodes", []):
+            node = Node(
+                name=node_spec["name"],
+                node_type=NodeType(node_spec["node_type"]),
+                description=node_spec.get("description", ""),
+                max_rps=node_spec.get("max_rps", 1000),
+                replicas=node_spec.get("replicas", 1),
+                latency_ms=node_spec.get("latency_ms", 50),
+                scaling_strategy=ScalingStrategy(
+                    node_spec.get("scaling_strategy", "none")
+                ),
+                critical=node_spec.get("critical", False),
+                tags=node_spec.get("tags", []),
+            )
+            arch.add_node(node)
+        
+        logger.info(f"  converting {len(spec.get('edges', []))} edges...")
+        for edge_spec in spec.get("edges", []):
+            source_name = edge_spec["source_name"]
+            target_name = edge_spec["target_name"]
+            
+            source_node = next(
+                (n for n in arch.iter_nodes() if n.name == source_name),
+                None,
+            )
+            target_node = next(
+                (n for n in arch.iter_nodes() if n.name == target_name),
+                None,
+            )
+            
+            if not source_node or not target_node:
+                raise ValueError(
+                    f"Edge references invalid node: {source_name} → {target_name}"
+                )
+            
+            edge = Edge(
+                source_id=source_node.node_id,
+                target_id=target_node.node_id,
+                connection_type=ConnectionType(edge_spec["connection_type"]),
+                max_rps=edge_spec.get("max_rps", 1000),
+                latency_ms=edge_spec.get("latency_ms", 5),
+                label=edge_spec.get("label", ""),
+                has_circuit_breaker=edge_spec.get("has_circuit_breaker", False),
+                has_retry=edge_spec.get("has_retry", False),
+                has_timeout=edge_spec.get("has_timeout", True),
+                timeout_ms=edge_spec.get("timeout_ms", None),
+            )
+            arch.add_edge(edge)
+        
+        state["architecture_graph"] = arch
+        logger.info(f"✓ CONVERT complete: {arch.node_count} nodes, {arch.edge_count} edges")
+        
+        return state
+
+    except Exception as e:
+        logger.error(f"x convert step failed: {e}") 
+        state["error_message"] = str(e)
+        state["error_step"] = "convert"
+        return state
+
+def should_continue(state: ArchitectureState) -> str:
+    if state.get("error_step"):
+        return "error"
+    return "continue"
+
+# graph built
+class ArchitecturePlannerWithLangGraph: 
+    def __init__(self, verbose: bool = False):
+        self.verbose = verbose
+        self.graph = self._build_graph()
+ 
+    def build_graph(self):
+        graph_builder = StateGraph(ArchitectureState)
+        
+        graph_builder.add_node("parse", parse_step)
+        graph_builder.add_node("validate", validate_step)
+        graph_builder.add_node("convert", convert_step)
+        
+        graph_builder.set_entry_point("parse")
+        
+        graph_builder.add_edge("parse", "validate")
+        graph_builder.add_edge("validate", "convert")
+        graph_builder.add_edge("convert", END)
+        
+        return graph_builder.compile()
+ 
+    async def plan(self, prompt: str) -> ArchitectureGraph:
+        logger.info(f"planning from prompt ({len(prompt)} chars)...")
+        
+        initial_state: ArchitectureState = {
+            "user_prompt": prompt,
+            "parsed_spec_json": None,
+            "parsed_spec_dict": None,
+            "validation_result": None,
+            "validation_passed": False,
+            "architecture_graph": None,
+            "error_message": None,
+            "error_step": None,
+        }
+        
+        final_state = await self.graph.ainvoke(initial_state)
+        
+        if final_state.get("error_message"):
+            logger.error(f"✗ Pipeline failed: {final_state['error_message']}")
+            raise ValueError(final_state["error_message"])
+        
+        arch = final_state.get("architecture_graph")
+        
+        if not arch:
+            raise ValueError("Pipeline completed but no architecture generated")
+        
+        logger.info(f"successfully generated: {arch.name}")
+        return arch
