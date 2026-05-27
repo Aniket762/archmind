@@ -77,3 +77,46 @@ async def parse_step(state: ArchitectureState)-> ArchitectureState:
         state["error_step"] = "parse"
         return state
     
+async def validate_step(state: ArchitectureGraph) -> ArchitectureGraph:
+    logger.info("validate step: spec realism ...")
+    if state.get("error_step") == "parse":
+        logger.warning("skipping parsing failed")
+        return state
+    
+    try:
+        llm=ChatOpenAI(
+            model="gpt-4o",
+            temperature=0.2,
+            max_tokens=500,
+        )
+
+        validation_prompt = get_validation_prompt()
+        spec_json = json.dumps(state["parsed_spec_dict"],indent=2)
+
+        formatted_prompt = validation_prompt.format(spec_json=spec_json)
+
+        messages = [
+            SystemMessage(content="You are an architecture reviewer"),
+            HumanMessage(content=formatted_prompt)
+        ]
+
+        logger.info("calling llm for validation...")
+        response = llm.invoke(messages)
+        validation_text = response.content.strip()
+
+        if "OK" in validation_text.upper():
+            state["validaion_passed"]= True
+            logger.info("validation passed {validation_text[:50]}")
+        else:
+            state["validaion_passed"] = False
+            logger.warning("validation issue found {validation_text[:100]}")
+
+        state["validaion_passed"] = validation_text
+        return state
+
+    except Exception as e:
+        logger.error("validation step failed:{e}")
+        state["error_message"] = str(e)
+        state["error_step"] = "validate"
+        return state
+    
